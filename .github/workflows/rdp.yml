@@ -51,16 +51,40 @@ jobs:
               exit 1
           }
 
+          # Tai va giai nen Ngrok
           Invoke-WebRequest -Uri "https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-windows-amd64.zip" -OutFile "ngrok.zip"
           Expand-Archive -Path "ngrok.zip" -DestinationPath "." -Force
 
+          # Cau hinh authtoken
           .\ngrok.exe config add-authtoken $env:NGROK_AUTH_TOKEN
 
-          Start-Process -FilePath ".\ngrok.exe" -ArgumentList "tcp 3389 --log=stdout" -PassThru
-          Start-Sleep -Seconds 8
+          # Chay ngrok background service
+          Start-Process powershell -ArgumentList "-NoExit", "-Command", ".\ngrok.exe tcp 3389"
 
-          $tunnels = (Invoke-RestMethod -Uri "http://127.0.0.1:4040/api/tunnels").tunnels
-          $publicUrl = $tunnels[0].public_url -replace "tcp://", ""
+          # Vong lap cho API ngrok khoi dong thanh cong
+          $maxRetries = 15
+          $retryCount = 0
+          $publicUrl = ""
+
+          while ($retryCount -lt $maxRetries) {
+              Start-Sleep -Seconds 3
+              try {
+                  $response = Invoke-RestMethod -Uri "http://127.0.0.1:4040/api/tunnels" -ErrorAction Stop
+                  if ($response.tunnels.Count -gt 0) {
+                      $publicUrl = $response.tunnels[0].public_url -replace "tcp://", ""
+                      break
+                  }
+              } catch {
+                  # API chua san sang, tiep tuc doi
+              }
+              $retryCount++
+          }
+
+          if (-not $publicUrl) {
+              Write-Error "Could not retrieve Ngrok tunnel URL. Please check your Authtoken."
+              exit 1
+          }
+
           $rdpHost = $publicUrl.Split(':')[0]
           $rdpPort = $publicUrl.Split(':')[1]
 
@@ -74,6 +98,7 @@ jobs:
           Write-Host "Password     : $env:RDP_PASS"
           Write-Host "==========================================" -ForegroundColor Green
 
+          # Giu session chay
           $timeout = 21000
           $counter = 0
           while ($counter -lt $timeout) {
