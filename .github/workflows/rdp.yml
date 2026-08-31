@@ -5,57 +5,168 @@ on:
 
 jobs:
   windows:
-    runs-on: windows-2025
+    runs-on: windows-latest
     timeout-minutes: 60
 
     steps:
+
+      # ==========================================
+      # 1. THÔNG TIN WINDOWS
+      # ==========================================
+      - name: Windows information
+        shell: powershell
+        run: |
+          Write-Host "======================================"
+          Write-Host "       WINDOWS INFORMATION"
+          Write-Host "======================================"
+
+          Get-ComputerInfo |
+            Select-Object WindowsProductName,
+                          WindowsVersion,
+                          OsArchitecture
+
+          Write-Host ""
+          Write-Host "Computer:"
+          hostname
+
+          Write-Host ""
+          Write-Host "Current user:"
+          whoami
+
+
+      # ==========================================
+      # 2. BẬT REMOTE DESKTOP
+      # ==========================================
       - name: Enable Remote Desktop
         shell: powershell
         env:
           RDP_PASSWORD: ${{ secrets.RDP_PASSWORD }}
         run: |
+
+          if ([string]::IsNullOrWhiteSpace($env:RDP_PASSWORD)) {
+            Write-Error "RDP_PASSWORD secret is missing."
+            exit 1
+          }
+
           Write-Host "Enabling Remote Desktop..."
 
+          # Enable RDP
           Set-ItemProperty `
             -Path "HKLM:\System\CurrentControlSet\Control\Terminal Server" `
             -Name "fDenyTSConnections" `
             -Value 0
 
-          Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
+          # Enable RDP firewall rules
+          Enable-NetFirewallRule `
+            -DisplayGroup "Remote Desktop"
 
+          # Set password for GitHub runneradmin
           net user runneradmin "$env:RDP_PASSWORD"
 
+          if ($LASTEXITCODE -ne 0) {
+            Write-Error "Failed to set runneradmin password."
+            exit 1
+          }
+
+          # Add user to Remote Desktop Users
           net localgroup "Remote Desktop Users" runneradmin /add
 
+          # Require Network Level Authentication
           Set-ItemProperty `
             -Path "HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp" `
             -Name "UserAuthentication" `
             -Value 1
 
-          Restart-Service TermService -Force
+          # Start Remote Desktop service
+          Set-Service -Name TermService -StartupType Automatic
+          Start-Service -Name TermService
 
-          Write-Host "RDP enabled."
+          Write-Host ""
+          Write-Host "Remote Desktop enabled."
 
+
+      # ==========================================
+      # 3. KIỂM TRA RDP
+      # ==========================================
+      - name: Verify RDP
+        shell: powershell
+        run: |
+
+          Write-Host "======================================"
+          Write-Host "          RDP VERIFICATION"
+          Write-Host "======================================"
+
+          Write-Host ""
+          Write-Host "----- TermService -----"
+
+          Get-Service TermService |
+            Select-Object Status, Name, StartType
+
+          Write-Host ""
+          Write-Host "----- Port 3389 -----"
+
+          $rdp = Get-NetTCPConnection `
+            -LocalPort 3389 `
+            -ErrorAction SilentlyContinue
+
+          if ($rdp) {
+            $rdp |
+              Select-Object LocalAddress,
+                            LocalPort,
+                            State,
+                            OwningProcess
+          }
+          else {
+            Write-Warning "Nothing is listening on TCP 3389."
+          }
+
+          Write-Host ""
+          Write-Host "----- Firewall -----"
+
+          Get-NetFirewallRule `
+            -DisplayGroup "Remote Desktop" |
+            Select-Object DisplayName,
+                          Enabled,
+                          Profile
+
+          Write-Host ""
+          Write-Host "----- User -----"
+
+          net user runneradmin
+
+
+      # ==========================================
+      # 4. CÀI / KẾT NỐI TAILSCALE
+      # ==========================================
       - name: Connect Tailscale
         uses: tailscale/github-action@v4
         with:
           authkey: ${{ secrets.TAILSCALE_AUTHKEY }}
 
+
+      # ==========================================
+      # 5. KIỂM TRA TAILSCALE + HIỂN THỊ THÔNG TIN
+      # ==========================================
       - name: Show RDP information
         shell: powershell
         run: |
+
           Write-Host ""
           Write-Host "======================================"
           Write-Host "       WINDOWS RDP INFORMATION"
           Write-Host "======================================"
-          Write-Host ""
 
+          Write-Host ""
           Write-Host "Computer:"
           hostname
 
           Write-Host ""
           Write-Host "Tailscale IPv4:"
           tailscale ip -4
+
+          Write-Host ""
+          Write-Host "Tailscale status:"
+          tailscale status
 
           Write-Host ""
           Write-Host "Username:"
@@ -67,13 +178,23 @@ jobs:
 
           Write-Host ""
           Write-Host "======================================"
-          Write-Host "Keep this workflow running."
+          Write-Host "       KEEP RUNNER RUNNING"
           Write-Host "======================================"
 
+
+      # ==========================================
+      # 6. GIỮ WINDOWS CHẠY
+      # ==========================================
       - name: Keep Windows running
         shell: powershell
         run: |
+
+          Write-Host "Windows runner is running."
+
           while ($true) {
+
+            Write-Host ""
             Write-Host "RDP runner is still running: $(Get-Date)"
+
             Start-Sleep -Seconds 60
           }
