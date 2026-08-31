@@ -1,0 +1,42 @@
+name: Windows Runner
+
+on:
+  workflow_dispatch:
+
+jobs:
+  windows:
+    runs-on: windows-latest
+
+    timeout-minutes: 10
+
+    steps:
+      - name: System information
+        shell: powershell
+        run: |
+          Write-Host "===== WINDOWS ====="
+          Get-ComputerInfo |
+            Select-Object WindowsProductName,
+                          WindowsVersion,
+                          OsArchitecture
+
+          Write-Host ""
+          Write-Host "===== COMPUTER ====="
+          Write-Host "Computer: $env:COMPUTERNAME"
+
+          Write-Host ""
+          Write-Host "===== USER ====="
+          whoami
+
+      - name: Network information
+        shell: powershell
+        run: |
+          Write-Host "===== NETWORK ====="
+          Get-NetIPConfiguration |
+            Format-Table -AutoSize
+
+      - name: Keep runner alive
+        shell: powershell
+        run: |
+          Write-Host "Runner is active."
+          Write-Host "This is a temporary GitHub-hosted VM."
+          Start-Sleep -Seconds 300
