@@ -1,42 +1,79 @@
-name: Windows Runner
+name: Windows RDP
 
 on:
   workflow_dispatch:
 
 jobs:
   windows:
-    runs-on: windows-latest
-
-    timeout-minutes: 10
+    runs-on: windows-2025
+    timeout-minutes: 60
 
     steps:
-      - name: System information
+      - name: Enable Remote Desktop
+        shell: powershell
+        env:
+          RDP_PASSWORD: ${{ secrets.RDP_PASSWORD }}
+        run: |
+          Write-Host "Enabling Remote Desktop..."
+
+          Set-ItemProperty `
+            -Path "HKLM:\System\CurrentControlSet\Control\Terminal Server" `
+            -Name "fDenyTSConnections" `
+            -Value 0
+
+          Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
+
+          net user runneradmin "$env:RDP_PASSWORD"
+
+          net localgroup "Remote Desktop Users" runneradmin /add
+
+          Set-ItemProperty `
+            -Path "HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp" `
+            -Name "UserAuthentication" `
+            -Value 1
+
+          Restart-Service TermService -Force
+
+          Write-Host "RDP enabled."
+
+      - name: Connect Tailscale
+        uses: tailscale/github-action@v4
+        with:
+          authkey: ${{ secrets.TAILSCALE_AUTHKEY }}
+
+      - name: Show RDP information
         shell: powershell
         run: |
-          Write-Host "===== WINDOWS ====="
-          Get-ComputerInfo |
-            Select-Object WindowsProductName,
-                          WindowsVersion,
-                          OsArchitecture
+          Write-Host ""
+          Write-Host "======================================"
+          Write-Host "       WINDOWS RDP INFORMATION"
+          Write-Host "======================================"
+          Write-Host ""
+
+          Write-Host "Computer:"
+          hostname
 
           Write-Host ""
-          Write-Host "===== COMPUTER ====="
-          Write-Host "Computer: $env:COMPUTERNAME"
+          Write-Host "Tailscale IPv4:"
+          tailscale ip -4
 
           Write-Host ""
-          Write-Host "===== USER ====="
-          whoami
+          Write-Host "Username:"
+          Write-Host ".\runneradmin"
 
-      - name: Network information
+          Write-Host ""
+          Write-Host "RDP Port:"
+          Write-Host "3389"
+
+          Write-Host ""
+          Write-Host "======================================"
+          Write-Host "Keep this workflow running."
+          Write-Host "======================================"
+
+      - name: Keep Windows running
         shell: powershell
         run: |
-          Write-Host "===== NETWORK ====="
-          Get-NetIPConfiguration |
-            Format-Table -AutoSize
-
-      - name: Keep runner alive
-        shell: powershell
-        run: |
-          Write-Host "Runner is active."
-          Write-Host "This is a temporary GitHub-hosted VM."
-          Start-Sleep -Seconds 300
+          while ($true) {
+            Write-Host "RDP runner is still running: $(Get-Date)"
+            Start-Sleep -Seconds 60
+          }
