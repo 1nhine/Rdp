@@ -9,67 +9,63 @@ jobs:
     timeout-minutes: 360
 
     steps:
-      - name: Setup Windows User and RDP
+      - name: Setup Windows User and Configure RDP
         shell: powershell
         run: |
+          # 1. Bật Remote Desktop và mở Firewall
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "UserAuthentication" -Value 1
           Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
 
+          # 2. Tạo mật khẩu ngẫu nhiên
           $chars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$'
           $pass = -join ((1..14) | ForEach-Object { $chars[(Get-Random -Maximum $chars.Length)] })
           $username = "rdpuser"
           $secPass = ConvertTo-SecureString $pass -AsPlainText -Force
 
-          New-LocalUser -Name $username -Password $secPass -FullName "RDP User"
+          # 3. Tạo User và cấp quyền Admin
+          New-LocalUser -Name $username -Password $secPass -FullName "RDP User" -Description "Runner Admin User"
           Add-LocalGroupMember -Group "Administrators" -Member $username
           Add-LocalGroupMember -Group "Remote Desktop Users" -Member $username
 
           echo "RDP_USER=$username" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           echo "RDP_PASS=$pass" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
-      - name: Start TCP Tunnel and Show Credentials
+      - name: Initialize RDP Bridge and Show Credentials
         shell: powershell
         run: |
-          # Tao tunnel TCP thong qua serveo.net
-          Start-Process -FilePath "cmd.exe" -ArgumentList "/c ssh -o StrictHostKeyChecking=no -o ServerAliveInterval=60 -R 0:localhost:3389 serveo.net > tunnel.log 2>&1" -PassThru
+          # Tải công cụ tạo tunnel Pinggy qua SSH
+          Write-Host "Creating Public TCP Bridge..."
           
-          $targetHost = ""
-          $targetPort = ""
-          for ($i = 0; $i -lt 20; $i++) {
+          # Mở kết nối reverse tunnel TCP qua cổng 443
+          $sshProcess = Start-Process powershell -ArgumentList "-NoProfile", "-Command", "ssh -p 443 -R0:localhost:3389 -o StrictHostKeyChecking=no -o ServerAliveInterval=20 -o ServerAliveCountMax=3 tcp@a.pinggy.io > tunnel.log 2>&1" -PassThru
+
+          $publicAddress = ""
+          for ($i = 0; $i -lt 30; $i++) {
               Start-Sleep -Seconds 2
               if (Test-Path "tunnel.log") {
-                  $content = Get-Content "tunnel.log" -Raw
-                  if ($content -match "Forwarding TCP traffic from (.*?):(\d+)") {
-                      $targetHost = $matches[1]
-                      $targetPort = $matches[2]
+                  $logContent = Get-Content "tunnel.log" -Raw
+                  if ($logContent -match "tcp://(.*?:\d+)") {
+                      $publicAddress = $matches[1]
                       break
                   }
               }
           }
 
-          if (-not $targetPort) {
-              Write-Host "Kenh Serveo ban, thu cong cu tunnel du phong..."
-              Invoke-WebRequest -Uri "https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-windows-amd64.zip" -OutFile "ngrok.zip"
-              Expand-Archive -Path "ngrok.zip" -DestinationPath "." -Force
-              Start-Process -FilePath ".\ngrok.exe" -ArgumentList "tcp 3389 --log=stdout" -PassThru -RedirectStandardOutput "ngrok.log"
-              Start-Sleep -Seconds 6
-              $log = Get-Content "ngrok.log" -Raw
-              if ($log -match "url=tcp://(.*?):(\d+)") {
-                  $targetHost = $matches[1]
-                  $targetPort = $matches[2]
-              }
+          if (-not $publicAddress) {
+              Write-Error "Bridge connection timeout! Please rerun workflow."
+              exit 1
           }
 
           Write-Host "==========================================" -ForegroundColor Green
           Write-Host "      THONG TIN DANG NHAP WINDOWS APP     " -ForegroundColor Cyan
           Write-Host "==========================================" -ForegroundColor Green
-          Write-Host "PC Name (IP:Port) : $targetHost`:$targetPort" -ForegroundColor Yellow
+          Write-Host "PC Name (IP:Port) : $publicAddress" -ForegroundColor Yellow
           Write-Host "Username          : $env:RDP_USER" -ForegroundColor Yellow
           Write-Host "Password          : $env:RDP_PASS" -ForegroundColor Yellow
           Write-Host "==========================================" -ForegroundColor Green
 
-          # Giu session online
+          # Giữ runner online tối đa ~6 giờ
           $maxSeconds = 21000
           $elapsed = 0
           while ($elapsed -lt $maxSeconds) {
