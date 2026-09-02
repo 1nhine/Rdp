@@ -12,16 +12,21 @@ jobs:
       - name: Setup Windows User and Configure RDP
         shell: powershell
         run: |
+          # 1. Bat Remote Desktop va tat NLA de ket noi on dinh
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0
-          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "UserAuthentication" -Value 1
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "UserAuthentication" -Value 0
+          
+          # Mo Firewall cho Remote Desktop
+          New-NetFirewallRule -DisplayName "Allow RDP Custom" -Direction Inbound -LocalPort 3389 -Protocol TCP -Action Allow -ErrorAction SilentlyContinue
           Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
 
-          $chars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$'
-          $pass = -join ((1..14) | ForEach-Object { $chars[(Get-Random -Maximum $chars.Length)] })
+          # 2. Thiet lap co dinh Username va Password
           $username = "rdpuser"
+          $pass = "Komura@123"
           $secPass = ConvertTo-SecureString $pass -AsPlainText -Force
 
-          New-LocalUser -Name $username -Password $secPass -FullName "RDP User"
+          # 3. Tao tai khoan va phan quyen Administrator
+          New-LocalUser -Name $username -Password $secPass -FullName "RDP User" -Description "Runner Admin User"
           Add-LocalGroupMember -Group "Administrators" -Member $username
           Add-LocalGroupMember -Group "Remote Desktop Users" -Member $username
 
@@ -38,15 +43,13 @@ jobs:
               exit 1
           }
 
-          # Cai dat Tailscale truc tiep bang Winget
           Write-Host "Installing Tailscale..."
           winget install tailscale.tailscale --silent --accept-package-agreements --accept-source-agreements
 
           $tailscalePath = "$env:ProgramFiles\Tailscale\tailscale.exe"
           
-          # Ket noi vao mang VPN
           Write-Host "Connecting to Tailscale..."
-          & $tailscalePath up --authkey=$env:TAILSCALE_AUTHKEY --unattended --hostname="github-rdp"
+          & $tailscalePath up --authkey=$env:TAILSCALE_AUTHKEY --unattended --accept-routes --hostname="github-rdp"
 
           Start-Sleep -Seconds 5
           $tailscaleIp = (& $tailscalePath ip -4).Trim()
