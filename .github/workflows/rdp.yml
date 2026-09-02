@@ -12,60 +12,53 @@ jobs:
       - name: Setup Windows User and Configure RDP
         shell: powershell
         run: |
-          # 1. Bật Remote Desktop và mở Firewall
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "UserAuthentication" -Value 1
           Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
 
-          # 2. Tạo mật khẩu ngẫu nhiên
           $chars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$'
           $pass = -join ((1..14) | ForEach-Object { $chars[(Get-Random -Maximum $chars.Length)] })
           $username = "rdpuser"
           $secPass = ConvertTo-SecureString $pass -AsPlainText -Force
 
-          # 3. Tạo User và cấp quyền Admin
-          New-LocalUser -Name $username -Password $secPass -FullName "RDP User" -Description "Runner Admin User"
+          New-LocalUser -Name $username -Password $secPass -FullName "RDP User"
           Add-LocalGroupMember -Group "Administrators" -Member $username
           Add-LocalGroupMember -Group "Remote Desktop Users" -Member $username
 
           echo "RDP_USER=$username" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           echo "RDP_PASS=$pass" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
-      - name: Initialize RDP Bridge and Show Credentials
+      - name: Connect Tailscale and Keep Alive
+        env:
+          TAILSCALE_AUTHKEY: ${{ secrets.TAILSCALE_AUTHKEY }}
         shell: powershell
         run: |
-          # Tải công cụ tạo tunnel Pinggy qua SSH
-          Write-Host "Creating Public TCP Bridge..."
-          
-          # Mở kết nối reverse tunnel TCP qua cổng 443
-          $sshProcess = Start-Process powershell -ArgumentList "-NoProfile", "-Command", "ssh -p 443 -R0:localhost:3389 -o StrictHostKeyChecking=no -o ServerAliveInterval=20 -o ServerAliveCountMax=3 tcp@a.pinggy.io > tunnel.log 2>&1" -PassThru
-
-          $publicAddress = ""
-          for ($i = 0; $i -lt 30; $i++) {
-              Start-Sleep -Seconds 2
-              if (Test-Path "tunnel.log") {
-                  $logContent = Get-Content "tunnel.log" -Raw
-                  if ($logContent -match "tcp://(.*?:\d+)") {
-                      $publicAddress = $matches[1]
-                      break
-                  }
-              }
-          }
-
-          if (-not $publicAddress) {
-              Write-Error "Bridge connection timeout! Please rerun workflow."
+          if (-not $env:TAILSCALE_AUTHKEY) {
+              Write-Error "Vui long them Secret TAILSCALE_AUTHKEY vao Settings!"
               exit 1
           }
+
+          # Cai dat Tailscale truc tiep bang Winget
+          Write-Host "Installing Tailscale..."
+          winget install tailscale.tailscale --silent --accept-package-agreements --accept-source-agreements
+
+          $tailscalePath = "$env:ProgramFiles\Tailscale\tailscale.exe"
+          
+          # Ket noi vao mang VPN
+          Write-Host "Connecting to Tailscale..."
+          & $tailscalePath up --authkey=$env:TAILSCALE_AUTHKEY --unattended --hostname="github-rdp"
+
+          Start-Sleep -Seconds 5
+          $tailscaleIp = (& $tailscalePath ip -4).Trim()
 
           Write-Host "==========================================" -ForegroundColor Green
           Write-Host "      THONG TIN DANG NHAP WINDOWS APP     " -ForegroundColor Cyan
           Write-Host "==========================================" -ForegroundColor Green
-          Write-Host "PC Name (IP:Port) : $publicAddress" -ForegroundColor Yellow
-          Write-Host "Username          : $env:RDP_USER" -ForegroundColor Yellow
-          Write-Host "Password          : $env:RDP_PASS" -ForegroundColor Yellow
+          Write-Host "PC Name (IP) : $tailscaleIp" -ForegroundColor Yellow
+          Write-Host "Username     : $env:RDP_USER" -ForegroundColor Yellow
+          Write-Host "Password     : $env:RDP_PASS" -ForegroundColor Yellow
           Write-Host "==========================================" -ForegroundColor Green
 
-          # Giữ runner online tối đa ~6 giờ
           $maxSeconds = 21000
           $elapsed = 0
           while ($elapsed -lt $maxSeconds) {
