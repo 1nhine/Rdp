@@ -9,18 +9,25 @@ jobs:
     timeout-minutes: 360
 
     steps:
-      - name: Enable Screen Sharing (VNC) and Set Password
+      - name: Configure User Password and Enable Screen Sharing
         run: |
-          # 1. Đặt mật khẩu cho user hiện tại (runner)
           PASS="Komura@123"
-          sudo dscl . -passwd /Users/runner $PASS
 
-          # 2. Bật dịch vụ Apple Remote Desktop / VNC
+          # 1. Dat mat khau moi cho user runner ma khong can pass cu
+          echo "runner:$PASS" | sudo chpasswd || sudo dscl . -create /Users/runner Password "$PASS"
+
+          # 2. Bat dich vu Apple Remote Desktop / Screen Sharing
           sudo /System/Library/CoreServices/RemoteManagement/ARDAgent.app/Contents/Resources/kickstart \
             -activate -configure -access -on \
-            -clientopts -setvnclegacy -vnclegacy yes \
-            -clientopts -setvncpw -vncpw $PASS \
-            -restart -agent -privs -all
+            -users runner \
+            -privs -all \
+            -restart -agent
+
+          # 3. Mo co mo ket noi VNC
+          sudo defaults write /Library/Preferences/com.apple.VNCSettings.txt VNCOn -bool TRUE
+          
+          # 4. Kich hoat service Screen Sharing trong launchctl
+          sudo launchctl load -w /System/Library/LaunchDaemons/com.apple.screensharing.plist || true
 
       - name: Connect Tailscale and Keep Alive
         env:
@@ -31,12 +38,12 @@ jobs:
             exit 1
           fi
 
-          # Cai dat Tailscale tren macOS bang Homebrew
+          # Cai dat Tailscale bang Homebrew
           brew install tailscale
           sudo tailscaled install-system-daemon
           sleep 5
 
-          # Ket noi vao Tailscale
+          # Ket noi Tailscale
           sudo tailscale up --authkey=$TAILSCALE_AUTHKEY --hostname="github-macos" --accept-routes
           
           TAILSCALE_IP=$(tailscale ip -4)
@@ -49,7 +56,7 @@ jobs:
           echo "Password              : Komura@123"
           echo "=========================================="
 
-          # Giu session online (toi da ~6 tieng)
+          # Giu session online
           MAX_SECONDS=21000
           ELAPSED=0
           while [ $ELAPSED -lt $MAX_SECONDS ]; do
