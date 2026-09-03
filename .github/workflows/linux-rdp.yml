@@ -1,0 +1,64 @@
+name: Linux RDP Runner
+
+on:
+  workflow_dispatch:
+
+jobs:
+  linux-session:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+
+    steps:
+      - name: Setup Desktop Environment and XRDP
+        run: |
+          # 1. Cap nhat va cai dat moi truong do hoa XFCE + XRDP
+          sudo apt update
+          sudo DEBIAN_FRONTEND=noninteractive apt install -y xfce4 xfce4-goodies xrdp
+
+          # 2. Cau hinh session cho XRDP
+          echo "xfce4-session" > ~/.xsession
+          sudo adduser xrdp ssl-cert
+
+          # 3. Tao user rdpuser co dinh voi mat khau Komura@123
+          sudo useradd -m -s /bin/bash rdpuser
+          echo "rdpuser:Komura@123" | sudo chpasswd
+          sudo usermod -aG sudo rdpuser
+          echo "xfce4-session" | sudo tee /home/rdpuser/.xsession
+          sudo chown rdpuser:rdpuser /home/rdpuser/.xsession
+
+          # 4. Khoi dong lai dich vu XRDP
+          sudo systemctl restart xrdp
+
+      - name: Connect Tailscale and Keep Alive
+        env:
+          TAILSCALE_AUTHKEY: ${{ secrets.TAILSCALE_AUTHKEY }}
+        run: |
+          if [ -z "$TAILSCALE_AUTHKEY" ]; then
+            echo "Vui long kiem tra Secret TAILSCALE_AUTHKEY trong Settings!"
+            exit 1
+          fi
+
+          # Cai dat Tailscale chinh thuc
+          curl -fsSL https://tailscale.com/install.sh | sh
+          sudo tailscale up --authkey=$TAILSCALE_AUTHKEY --hostname="github-linux-rdp" --accept-routes
+
+          TAILSCALE_IP=$(tailscale ip -4)
+
+          echo "=========================================="
+          echo "      THONG TIN DANG NHAP WINDOWS APP     "
+          echo "=========================================="
+          echo "PC Name (IP) : $TAILSCALE_IP"
+          echo "Port         : 3389"
+          echo "Username     : rdpuser"
+          echo "Password     : Komura@123"
+          echo "=========================================="
+
+          # Giu session chay toi da ~6 gio
+          MAX_SECONDS=21000
+          ELAPSED=0
+          while [ $ELAPSED -lt $MAX_SECONDS ]; do
+            sleep 60
+            ELAPSED=$((ELAPSED + 60))
+            REMAINING=$(( (MAX_SECONDS - ELAPSED) / 60 ))
+            echo "Runner is active... Remaining: $REMAINING minutes."
+          done
