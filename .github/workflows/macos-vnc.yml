@@ -9,24 +9,18 @@ jobs:
     timeout-minutes: 360
 
     steps:
-      - name: Enable Screen Sharing and Wake Display
+      - name: Setup Virtual Display and Native VNC Server
         run: |
-          # 1. Dat mat khau cho tai khoan runner dang chiem GUI session
-          sudo sysadminctl -resetPasswordFor runner -newPassword "Komura@123"
+          # 1. Cai dat tigervnc
+          brew install tiger-vnc
 
-          # 2. Bat Apple Remote Desktop cho user runner
-          sudo /System/Library/CoreServices/RemoteManagement/ARDAgent.app/Contents/Resources/kickstart \
-            -activate -configure -access -on \
-            -users runner \
-            -privs -all \
-            -restart -agent
+          # 2. Tao thu muc cau hinh va thiet lap mat khau VNC dung 8 ky tu
+          mkdir -p ~/.vnc
+          echo "Komura12" | vncpasswd -f > ~/.vnc/passwd
+          chmod 600 ~/.vnc/passwd
 
-          # 3. Kich hoat dich vu chia se man hinh
-          sudo launchctl load -w /System/Library/LaunchDaemons/com.apple.screensharing.plist 2>/dev/null || true
-
-          # 4. Bat hien thi WindowServer va danh thuc man hinh
-          caffeinate -u -t 2 &
-          osascript -e 'tell application "System Events" to key code 123'
+          # 3. Khoi chay VNC server tao man hinh ao doc lap (khong bi loi man hinh den cua Apple)
+          vncserver :1 -geometry 1280x800 -depth 24
 
       - name: Connect Tailscale and Keep Alive
         env:
@@ -48,9 +42,8 @@ jobs:
           echo "=========================================="
           echo "      THONG TIN DANG NHAP VNC APP         "
           echo "=========================================="
-          echo "Address  : $TAILSCALE_IP"
-          echo "Username : runner"
-          echo "Password : Komura@123"
+          echo "VNC Address : $TAILSCALE_IP:5901"
+          echo "Password    : Komura12"
           echo "=========================================="
 
           MAX_SECONDS=21000
