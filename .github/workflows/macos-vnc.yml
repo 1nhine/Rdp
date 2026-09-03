@@ -1,0 +1,60 @@
+name: macOS VNC Runner
+
+on:
+  workflow_dispatch:
+
+jobs:
+  macos-session:
+    runs-on: macos-latest
+    timeout-minutes: 360
+
+    steps:
+      - name: Enable Screen Sharing (VNC) and Set Password
+        run: |
+          # 1. Đặt mật khẩu cho user hiện tại (runner)
+          PASS="Komura@123"
+          sudo dscl . -passwd /Users/runner $PASS
+
+          # 2. Bật dịch vụ Apple Remote Desktop / VNC
+          sudo /System/Library/CoreServices/RemoteManagement/ARDAgent.app/Contents/Resources/kickstart \
+            -activate -configure -access -on \
+            -clientopts -setvnclegacy -vnclegacy yes \
+            -clientopts -setvncpw -vncpw $PASS \
+            -restart -agent -privs -all
+
+      - name: Connect Tailscale and Keep Alive
+        env:
+          TAILSCALE_AUTHKEY: ${{ secrets.TAILSCALE_AUTHKEY }}
+        run: |
+          if [ -z "$TAILSCALE_AUTHKEY" ]; then
+            echo "Vui long them Secret TAILSCALE_AUTHKEY vao Settings!"
+            exit 1
+          fi
+
+          # Cai dat Tailscale tren macOS bang Homebrew
+          brew install tailscale
+          sudo tailscaled install-system-daemon
+          sleep 5
+
+          # Ket noi vao Tailscale
+          sudo tailscale up --authkey=$TAILSCALE_AUTHKEY --hostname="github-macos" --accept-routes
+          
+          TAILSCALE_IP=$(tailscale ip -4)
+
+          echo "=========================================="
+          echo "      THONG TIN DANG NHAP MAC VNC         "
+          echo "=========================================="
+          echo "VNC Address (IP:Port) : $TAILSCALE_IP:5900"
+          echo "Username              : runner"
+          echo "Password              : Komura@123"
+          echo "=========================================="
+
+          # Giu session online (toi da ~6 tieng)
+          MAX_SECONDS=21000
+          ELAPSED=0
+          while [ $ELAPSED -lt $MAX_SECONDS ]; do
+            sleep 60
+            ELAPSED=$((ELAPSED + 60))
+            REMAINING=$(( (MAX_SECONDS - ELAPSED) / 60 ))
+            echo "Runner is active... Remaining: $REMAINING minutes."
+          done
