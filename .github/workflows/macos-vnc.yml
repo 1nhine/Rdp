@@ -9,21 +9,22 @@ jobs:
     timeout-minutes: 360
 
     steps:
-      - name: Setup User and Enable Apple Screen Sharing
+      - name: Create VNC User and Enable Apple Screen Sharing
         run: |
+          USERNAME="rdpuser"
           PASS="Komura@123"
 
-          # 1. Đặt mật khẩu cho user runner
-          echo "runner:$PASS" | sudo chpasswd
+          # 1. Tao tai khoan Admin moi hoan toan bang sysadminctl
+          sudo sysadminctl -addUser "$USERNAME" -fullName "RDP Admin" -password "$PASS" -admin
 
-          # 2. Bật Apple Screen Sharing với đầy đủ quyền cho user runner
+          # 2. Bat Apple Remote Desktop / Screen Sharing cho tai khoan moi
           sudo /System/Library/CoreServices/RemoteManagement/ARDAgent.app/Contents/Resources/kickstart \
             -activate -configure -access -on \
-            -users runner \
+            -users "$USERNAME" \
             -privs -all \
             -restart -agent
 
-          # 3. Kích hoạt daemon màn hình
+          # 3. Kich hoat service Screen Sharing
           sudo launchctl load -w /System/Library/LaunchDaemons/com.apple.screensharing.plist 2>/dev/null || true
 
       - name: Connect Tailscale and Keep Alive
@@ -48,7 +49,7 @@ jobs:
           echo "=========================================="
           echo "Address  : $TAILSCALE_IP"
           echo "Port     : 5900"
-          echo "Username : runner"
+          echo "Username : rdpuser"
           echo "Password : Komura@123"
           echo "=========================================="
 
