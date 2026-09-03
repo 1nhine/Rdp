@@ -9,23 +9,24 @@ jobs:
     timeout-minutes: 360
 
     steps:
-      - name: Create VNC User and Enable Apple Screen Sharing
+      - name: Enable Screen Sharing and Wake Display
         run: |
-          USERNAME="rdpuser"
-          PASS="Komura@123"
+          # 1. Dat mat khau cho tai khoan runner dang chiem GUI session
+          sudo sysadminctl -resetPasswordFor runner -newPassword "Komura@123"
 
-          # 1. Tao tai khoan Admin moi hoan toan bang sysadminctl
-          sudo sysadminctl -addUser "$USERNAME" -fullName "RDP Admin" -password "$PASS" -admin
-
-          # 2. Bat Apple Remote Desktop / Screen Sharing cho tai khoan moi
+          # 2. Bat Apple Remote Desktop cho user runner
           sudo /System/Library/CoreServices/RemoteManagement/ARDAgent.app/Contents/Resources/kickstart \
             -activate -configure -access -on \
-            -users "$USERNAME" \
+            -users runner \
             -privs -all \
             -restart -agent
 
-          # 3. Kich hoat service Screen Sharing
+          # 3. Kich hoat dich vu chia se man hinh
           sudo launchctl load -w /System/Library/LaunchDaemons/com.apple.screensharing.plist 2>/dev/null || true
+
+          # 4. Bat hien thi WindowServer va danh thuc man hinh
+          caffeinate -u -t 2 &
+          osascript -e 'tell application "System Events" to key code 123'
 
       - name: Connect Tailscale and Keep Alive
         env:
@@ -48,8 +49,7 @@ jobs:
           echo "      THONG TIN DANG NHAP VNC APP         "
           echo "=========================================="
           echo "Address  : $TAILSCALE_IP"
-          echo "Port     : 5900"
-          echo "Username : rdpuser"
+          echo "Username : runner"
           echo "Password : Komura@123"
           echo "=========================================="
 
