@@ -11,22 +11,27 @@ jobs:
     steps:
       - name: Setup Desktop Environment and XRDP
         run: |
-          # 1. Cap nhat va cai dat moi truong do hoa XFCE + XRDP
           sudo apt update
-          sudo DEBIAN_FRONTEND=noninteractive apt install -y xfce4 xfce4-goodies xrdp
+          sudo DEBIAN_FRONTEND=noninteractive apt install -y xfce4 xfce4-goodies dbus-x11 xrdp
 
-          # 2. Cau hinh session cho XRDP
-          echo "xfce4-session" > ~/.xsession
-          sudo adduser xrdp ssl-cert
-
-          # 3. Tao user rdpuser co dinh voi mat khau Komura@123
-          sudo useradd -m -s /bin/bash rdpuser
+          # 1. Tao user rdpuser voi mat khau Komura@123
+          sudo useradd -m -s /bin/bash rdpuser || true
           echo "rdpuser:Komura@123" | sudo chpasswd
           sudo usermod -aG sudo rdpuser
-          echo "xfce4-session" | sudo tee /home/rdpuser/.xsession
-          sudo chown rdpuser:rdpuser /home/rdpuser/.xsession
+          sudo adduser xrdp ssl-cert
 
-          # 4. Khoi dong lai dich vu XRDP
+          # 2. Cau hinh session D-Bus chuan de tranh loi failsafe session
+          cat << 'EOF' | sudo tee /home/rdpuser/.xsession
+          export DESKTOP_SESSION=xfce
+          export XDG_CURRENT_DESKTOP=XFCE
+          export XDG_CONFIG_DIRS=/etc/xdg
+          exec dbus-run-session -- startxfce4
+          EOF
+
+          sudo chown rdpuser:rdpuser /home/rdpuser/.xsession
+          sudo chmod +x /home/rdpuser/.xsession
+
+          # 3. Khoi dong lai dich vu XRDP
           sudo systemctl restart xrdp
 
       - name: Connect Tailscale and Keep Alive
@@ -38,7 +43,6 @@ jobs:
             exit 1
           fi
 
-          # Cai dat Tailscale chinh thuc
           curl -fsSL https://tailscale.com/install.sh | sh
           sudo tailscale up --authkey=$TAILSCALE_AUTHKEY --hostname="github-linux-rdp" --accept-routes
 
@@ -53,7 +57,6 @@ jobs:
           echo "Password     : Komura@123"
           echo "=========================================="
 
-          # Giu session chay toi da ~6 gio
           MAX_SECONDS=21000
           ELAPSED=0
           while [ $ELAPSED -lt $MAX_SECONDS ]; do
