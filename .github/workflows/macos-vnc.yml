@@ -9,34 +9,22 @@ jobs:
     timeout-minutes: 360
 
     steps:
-      - name: Configure Screen Sharing with VNC Password
+      - name: Setup User and Enable Apple Screen Sharing
         run: |
-          # 1. Mat khau dung chuan 8 ky tu cho VNC legacy
-          VNCPASS="Komura12"
+          PASS="Komura@123"
 
-          # 2. Ma hoa mat khau sang hex bang Perl theo chuan DES cua VNC
-          HASH=$(perl -e '
-            use strict;
-            my $key = "\x17\x52\x6b\x06\x23\x4e\x58\x07";
-            my $pw = substr($ARGV[0] . "\0" x 8, 0, 8);
-            my @k = unpack("C*", $key);
-            my @p = unpack("C*", $pw);
-            my @res;
-            for my $i (0..7) {
-                push @res, sprintf("%02x", $p[$i] ^ $k[$i]);
-            }
-            print join("", @res);
-          ' "$VNCPASS")
+          # 1. Đặt mật khẩu cho user runner
+          echo "runner:$PASS" | sudo chpasswd
 
-          # 3. Ghi hash mat khau truc tiep vao cau hinh he thong
-          sudo defaults write /Library/Preferences/com.apple.VNCSettings.txt VNCOn -bool TRUE
-          sudo defaults write /Library/Preferences/com.apple.VNCSettings.txt Password -data "$HASH"
-
-          # 4. Kich hoat va cau hinh ARD Agent ho tro VNC legacy
+          # 2. Bật Apple Screen Sharing với đầy đủ quyền cho user runner
           sudo /System/Library/CoreServices/RemoteManagement/ARDAgent.app/Contents/Resources/kickstart \
             -activate -configure -access -on \
-            -clientopts -setvnclegacy -vnclegacy yes \
-            -restart -agent -privs -all
+            -users runner \
+            -privs -all \
+            -restart -agent
+
+          # 3. Kích hoạt daemon màn hình
+          sudo launchctl load -w /System/Library/LaunchDaemons/com.apple.screensharing.plist 2>/dev/null || true
 
       - name: Connect Tailscale and Keep Alive
         env:
@@ -58,8 +46,10 @@ jobs:
           echo "=========================================="
           echo "      THONG TIN DANG NHAP VNC APP         "
           echo "=========================================="
-          echo "VNC Address : $TAILSCALE_IP:5900"
-          echo "Password    : Komura12"
+          echo "Address  : $TAILSCALE_IP"
+          echo "Port     : 5900"
+          echo "Username : runner"
+          echo "Password : Komura@123"
           echo "=========================================="
 
           MAX_SECONDS=21000
