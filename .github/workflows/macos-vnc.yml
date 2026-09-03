@@ -9,25 +9,34 @@ jobs:
     timeout-minutes: 360
 
     steps:
-      - name: Configure User Password and Enable Screen Sharing
+      - name: Configure Screen Sharing with VNC Password
         run: |
-          PASS="Komura@123"
+          # 1. Mat khau dung chuan 8 ky tu cho VNC legacy
+          VNCPASS="Komura12"
 
-          # 1. Dat mat khau moi cho user runner ma khong can pass cu
-          echo "runner:$PASS" | sudo chpasswd || sudo dscl . -create /Users/runner Password "$PASS"
+          # 2. Ma hoa mat khau sang hex bang Perl theo chuan DES cua VNC
+          HASH=$(perl -e '
+            use strict;
+            my $key = "\x17\x52\x6b\x06\x23\x4e\x58\x07";
+            my $pw = substr($ARGV[0] . "\0" x 8, 0, 8);
+            my @k = unpack("C*", $key);
+            my @p = unpack("C*", $pw);
+            my @res;
+            for my $i (0..7) {
+                push @res, sprintf("%02x", $p[$i] ^ $k[$i]);
+            }
+            print join("", @res);
+          ' "$VNCPASS")
 
-          # 2. Bat dich vu Apple Remote Desktop / Screen Sharing
+          # 3. Ghi hash mat khau truc tiep vao cau hinh he thong
+          sudo defaults write /Library/Preferences/com.apple.VNCSettings.txt VNCOn -bool TRUE
+          sudo defaults write /Library/Preferences/com.apple.VNCSettings.txt Password -data "$HASH"
+
+          # 4. Kich hoat va cau hinh ARD Agent ho tro VNC legacy
           sudo /System/Library/CoreServices/RemoteManagement/ARDAgent.app/Contents/Resources/kickstart \
             -activate -configure -access -on \
-            -users runner \
-            -privs -all \
-            -restart -agent
-
-          # 3. Mo co mo ket noi VNC
-          sudo defaults write /Library/Preferences/com.apple.VNCSettings.txt VNCOn -bool TRUE
-          
-          # 4. Kich hoat service Screen Sharing trong launchctl
-          sudo launchctl load -w /System/Library/LaunchDaemons/com.apple.screensharing.plist || true
+            -clientopts -setvnclegacy -vnclegacy yes \
+            -restart -agent -privs -all
 
       - name: Connect Tailscale and Keep Alive
         env:
@@ -38,25 +47,21 @@ jobs:
             exit 1
           fi
 
-          # Cai dat Tailscale bang Homebrew
           brew install tailscale
           sudo tailscaled install-system-daemon
           sleep 5
 
-          # Ket noi Tailscale
           sudo tailscale up --authkey=$TAILSCALE_AUTHKEY --hostname="github-macos" --accept-routes
           
           TAILSCALE_IP=$(tailscale ip -4)
 
           echo "=========================================="
-          echo "      THONG TIN DANG NHAP MAC VNC         "
+          echo "      THONG TIN DANG NHAP VNC APP         "
           echo "=========================================="
-          echo "VNC Address (IP:Port) : $TAILSCALE_IP:5900"
-          echo "Username              : runner"
-          echo "Password              : Komura@123"
+          echo "VNC Address : $TAILSCALE_IP:5900"
+          echo "Password    : Komura12"
           echo "=========================================="
 
-          # Giu session online
           MAX_SECONDS=21000
           ELAPSED=0
           while [ $ELAPSED -lt $MAX_SECONDS ]; do
